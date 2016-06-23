@@ -325,79 +325,57 @@ namespace EventStore.Core.Tests.ClientAPI
         }
 
         [Test]
-        public void when_live_processing_and_disconnected_reconnect_keeps_events_ordered()
+        public void when_subscription_is_dropped_and_connection_reconnects_subscription_should_not_process_events()
         {
-            int callCount = 0;
+            VolatileEventStoreSubscription volatileEventStoreSubscription = null;
+            Action<EventStoreSubscription, SubscriptionDropReason, Exception> innerSubscriptionDrop = null;
+            var evnt = new ClientMessage.ResolvedEvent(new ClientMessage.EventRecord(StreamId, 1, Guid.NewGuid().ToByteArray(), null, 0, 0, null, null, null, null), null, 0, 0);
+
             _connection.HandleReadStreamEventsForwardAsync((stream, start, max) =>
             {
-                callCount++;
-
                 var taskCompletionSource = new TaskCompletionSource<StreamEventsSlice>();
-                if (callCount == 1)
-                {
-                    taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count: 0, isEnd: true));
-                }
-                else if (callCount == 2)
-                {
-                    taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count: 0, isEnd: true));
-                }
-
+                taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count: 0, isEnd: true));
                 return taskCompletionSource.Task;
             });
 
-            VolatileEventStoreSubscription volatileEventStoreSubscription = null;
-            Action<EventStoreSubscription, SubscriptionDropReason, Exception> innerSubscriptionDrop = null;
             _connection.HandleSubscribeToStreamAsync((stream, raise, drop) =>
             {
                 innerSubscriptionDrop = drop;
                 var taskCompletionSource = new TaskCompletionSource<EventStoreSubscription>();
                 volatileEventStoreSubscription = CreateVolatileSubscription(raise, drop, null);
                 taskCompletionSource.SetResult(volatileEventStoreSubscription);
+                raise(volatileEventStoreSubscription, new ResolvedEvent(evnt));
                 return taskCompletionSource.Task;
             });
 
-            Assert.That(_subscription.Start().Wait(TimeoutMs));
-            Assert.That(_raisedEvents.Count, Is.EqualTo(0));
+            if (!_subscription.Start().Wait(TimeoutMs))
+                Assert.Fail("Timed out waiting for subscription to start");
 
-            Assert.That(innerSubscriptionDrop, Is.Not.Null);
+            if (!_raisedEventEvent.Wait(TimeoutMs))
+                Assert.Fail("Timed out waiting for an event");
+
             innerSubscriptionDrop(volatileEventStoreSubscription, SubscriptionDropReason.ConnectionClosed, null);
 
-            Assert.That(_dropEvent.Wait(TimeoutMs));
-            _dropEvent.Reset();
+            if (!_dropEvent.Wait(TimeoutMs))
+                Assert.Fail("Timed out waiting for subscription dropped event");
 
-            var waitForOutOfOrderEvent = new ManualResetEventSlim();
-            callCount = 0;
+            var eventTrigger = new ManualResetEventSlim();
             _connection.HandleReadStreamEventsForwardAsync((stream, start, max) =>
             {
-                callCount++;
-
                 var taskCompletionSource = new TaskCompletionSource<StreamEventsSlice>();
-                if (callCount == 1)
-                {
-                    taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count:0, isEnd: true));
-                }
-                else if (callCount == 2)
-                {
-                    Assert.That(waitForOutOfOrderEvent.Wait(TimeoutMs));
-                    taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count: 1, isEnd: true));
-                }
-
+                eventTrigger.Wait(TimeoutMs);
+                taskCompletionSource.SetResult(CreateStreamEventsSlice(fromEvent: 0, count: 1, isEnd: true));
                 return taskCompletionSource.Task;
             });
 
-            var event1 = new ClientMessage.ResolvedEvent(new ClientMessage.EventRecord(StreamId, 1, Guid.NewGuid().ToByteArray(), null, 0, 0, null, null, null, null), null, 0, 0);
-            
+            _raisedEventEvent.Reset();
             _connection.HandleSubscribeToStreamAsync((stream, raise, drop) =>
             {
                 var taskCompletionSource = new TaskCompletionSource<EventStoreSubscription>();
-                VolatileEventStoreSubscription volatileEventStoreSubscription2 = CreateVolatileSubscription(raise, drop, null);
                 taskCompletionSource.SetResult(volatileEventStoreSubscription);
-
-                raise(volatileEventStoreSubscription2, new ResolvedEvent(event1));
-                
+                raise(volatileEventStoreSubscription, new ResolvedEvent(evnt));
                 return taskCompletionSource.Task;
             });
-
 
             var reconnectTask = Task.Factory.StartNew(() =>
             {
@@ -405,16 +383,15 @@ namespace EventStore.Core.Tests.ClientAPI
 
             }, TaskCreationOptions.AttachedToParent);
 
-            Assert.That(_raisedEventEvent.Wait(100), Is.False);
+            if (!reconnectTask.Wait(TimeoutMs))
+                Assert.Fail("Timed out waiting for connection to reconnect");
 
-            waitForOutOfOrderEvent.Set();
+            eventTrigger.Set();
 
-            Assert.That(_raisedEventEvent.Wait(TimeoutMs));
+            if(_raisedEventEvent.Wait(TimeoutMs))
+                Assert.Fail("Should not have got an event, but did");
 
-            Assert.That(_raisedEvents[0].OriginalEventNumber, Is.EqualTo(0));
-            Assert.That(_raisedEvents[1].OriginalEventNumber, Is.EqualTo(1));
-
-            Assert.That(reconnectTask.Wait(TimeoutMs));
+            Assert.AreEqual(1, _raisedEvents.Count);
         }
 
         private static VolatileEventStoreSubscription CreateVolatileSubscription(Action<EventStoreSubscription, ResolvedEvent> raise, Action<EventStoreSubscription, SubscriptionDropReason, Exception> drop, int? lastEventNumber)

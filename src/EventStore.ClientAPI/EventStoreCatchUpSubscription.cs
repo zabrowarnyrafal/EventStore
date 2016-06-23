@@ -353,6 +353,9 @@ namespace EventStore.ClientAPI
                 if (_subscriptionDropped != null)
                     _subscriptionDropped(this, reason, error);
                 _stopped.Set();
+
+                if (Verbose) Log.Debug("Catch-up Subscription to {0}: unhooking from connection.Connected.");
+                _connection.Connected -= OnReconnect;
             }
         }
 
