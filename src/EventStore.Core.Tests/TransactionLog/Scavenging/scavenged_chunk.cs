@@ -23,7 +23,7 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging
                 Assert.IsTrue(res.Success);
                 logPos = res.NewPosition;
             }
-            chunk.CompleteScavenge(map);
+            chunk.CompleteScavenge(map, false);
 
             chunk.CacheInMemory();
 
