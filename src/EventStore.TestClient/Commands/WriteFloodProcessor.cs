@@ -70,7 +70,7 @@ namespace EventStore.TestClient.Commands
             long streamDeleted = 0;
             long all = 0;
 
-            var streams = Enumerable.Range(0, streamsCnt).Select(x => Guid.NewGuid().ToString()).ToArray();
+            var streams = Enumerable.Range(0, streamsCnt).Select(x => "A").ToArray();
             //var streams = Enumerable.Range(0, streamsCnt).Select(x => string.Format("stream-{0}", x)).ToArray();
             var sw2 = new Stopwatch();
             for (int i = 0; i < clientsCnt; i++)
@@ -149,10 +149,10 @@ namespace EventStore.TestClient.Commands
                        var events = new TcpClientMessageDto.NewEvent[batchSize];
                        for(int q=0;q<batchSize;q++) {
                             events[q] = new TcpClientMessageDto.NewEvent(Guid.NewGuid().ToByteArray(),
-                                            "TakeSomeSpaceEvent",
+                                            "B",
                                             1,0,
                                             Common.Utils.Helper.UTF8NoBom.GetBytes("{ \"DATA\" : \"" + new string('*', size) + "\"}"),
-                                            Common.Utils.Helper.UTF8NoBom.GetBytes("{ \"METADATA\" : \"" + new string('$', 100) + "\"}"));
+                                            Common.Utils.Helper.UTF8NoBom.GetBytes("{ \"METADATA\" : \"" + new string('$', size) + "\"}"));
                         }
                         var corrid = Guid.NewGuid();
                         var write = new TcpClientMessageDto.WriteEvents(
