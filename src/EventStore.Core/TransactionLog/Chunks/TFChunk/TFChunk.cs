@@ -772,8 +772,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 || (ChunkHeader.IsScavenged && _logicalDataSize < _physicalDataSize && !isUpgrade)
                 )
             {
-                throw new Exception(string.Format("Data sizes violation. Chunk: {0}, IsScavenged: {1}, LogicalDataSize: {2}, PhysicalDataSize: {3}.",
-                                                  FileName, ChunkHeader.IsScavenged, _logicalDataSize, _physicalDataSize));
+                throw new Exception(string.Format("Data sizes violation. Chunk: {0}, IsScavenged: {1}, LogicalDataSize: {2}, PhysicalDataSize: {3}, IsUpgrade: {4}.",
+                                                  FileName, ChunkHeader.IsScavenged, _logicalDataSize, _physicalDataSize, isUpgrade));
             }
 
             return RecordWriteResult.Successful(oldPosition, _physicalDataSize);

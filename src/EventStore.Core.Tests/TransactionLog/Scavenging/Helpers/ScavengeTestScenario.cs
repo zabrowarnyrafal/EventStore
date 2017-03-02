@@ -11,6 +11,7 @@ using EventStore.Core.Messaging;
 using EventStore.Core.Services.Storage.ReaderIndex;
 using EventStore.Core.Settings;
 using EventStore.Core.Tests.Fakes;
+using EventStore.Core.Tests.Bus.Helpers;
 using EventStore.Core.TransactionLog;
 using EventStore.Core.TransactionLog.Checkpoint;
 using EventStore.Core.TransactionLog.Chunks;
@@ -33,6 +34,8 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging.Helpers
         private DbResult _dbResult;
         private LogRecord[][] _keptRecords;
         private bool _checked;
+
+        private TableIndex _tableIndex;
 
         protected virtual bool UnsafeIgnoreHardDelete() {
             return false;
@@ -69,21 +72,36 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging.Helpers
                 () => new TFChunkReader(_dbResult.Db, _dbResult.Db.Config.WriterCheckpoint));
             var lowHasher = new XXHashUnsafe();
             var highHasher = new Murmur3AUnsafe();
-            var tableIndex = new TableIndex(indexPath, lowHasher, highHasher,
+            _tableIndex = new TableIndex(indexPath, lowHasher, highHasher,
                                             () => new HashListMemTable(PTableVersions.IndexV3, maxSize: 200),
                                             () => new TFReaderLease(readerPool),
                                             PTableVersions.IndexV3,
                                             maxSizeForMemory: 100,
                                             maxTablesPerLevel: 2);
-            ReadIndex = new ReadIndex(new NoopPublisher(), readerPool, tableIndex, 100, true, _metastreamMaxCount, Opts.HashCollisionReadLimitDefault);
+            ReadIndex = new ReadIndex(new NoopPublisher(), readerPool, _tableIndex, 100, true, _metastreamMaxCount, Opts.HashCollisionReadLimitDefault);
             ReadIndex.Init(_dbResult.Db.Config.WriterCheckpoint.Read());
 
-            //var scavengeReadIndex = new ScavengeReadIndex(_dbResult.Streams, _metastreamMaxCount);
-            var bus = new InMemoryBus("Bus");
-            var ioDispatcher = new IODispatcher(bus, new PublishEnvelope(bus));
-            var scavenger = new TFChunkScavenger(_dbResult.Db, ioDispatcher, tableIndex, ReadIndex, Guid.NewGuid(), "fakeNodeIp",
+            Scavenge();
+
+            AfterScavenge();
+        }
+
+        protected List<Message> Scavenge()
+        {
+            var _consumer = new TestHandler<Message>();
+            var ScavengeBus = new InMemoryBus("Bus");
+            var ioDispatcher = new IODispatcher(ScavengeBus, new PublishEnvelope(ScavengeBus));
+
+            ScavengeBus.Subscribe(_consumer);
+            var scavenger = new TFChunkScavenger(_dbResult.Db, ioDispatcher, _tableIndex, ReadIndex, Guid.NewGuid(), "fakeNodeIp",
                                             unsafeIgnoreHardDeletes: UnsafeIgnoreHardDelete());
             scavenger.Scavenge(alwaysKeepScavenged: true, mergeChunks: false);
+
+            return _consumer.HandledMessages;
+        }
+
+        public virtual void AfterScavenge()
+        {
         }
 
         public override void TestFixtureTearDown()
@@ -127,7 +145,7 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging.Helpers
             }
         }
 
-        protected void CheckRecordsV0()
+        protected void CheckRecordsV0(bool checkVersion = false)
         {
             _checked = true;
             Assert.AreEqual(_keptRecords.Length, _dbResult.Db.Manager.ChunksCount, "Wrong chunks count.");
@@ -151,6 +169,8 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging.Helpers
                     var chunkRecord = chunkRecords[j];
 
                     Assert.AreEqual(keptRecord.RecordType, chunkRecord.RecordType, "Wrong log record #{0} read from chunk #{1}", j, i);
+                    if(checkVersion) Assert.AreEqual(LogRecordVersion.LogRecordV1, chunkRecord.Version);
+
                     switch(keptRecord.RecordType) {
                         case LogRecordType.Prepare:
                             var keptPrepare = (PrepareLogRecord)keptRecord;

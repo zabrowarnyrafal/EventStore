@@ -13,7 +13,7 @@ namespace EventStore.Core.TransactionLog.Chunks
         // flags within single byte
         public readonly bool IsCompleted;
         public readonly byte MapVersion;
-        private readonly bool IsUpgrade;
+        public readonly bool IsUpgrade;
 
         public readonly int PhysicalDataSize; // the size of a section of data in chunk
         public readonly long LogicalDataSize;  // the size of a logical data size (after scavenge LogicalDataSize can be > physicalDataSize)

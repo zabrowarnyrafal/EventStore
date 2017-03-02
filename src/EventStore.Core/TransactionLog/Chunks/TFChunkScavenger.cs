@@ -174,8 +174,8 @@ namespace EventStore.Core.TransactionLog.Chunks
                 foreach (var oldChunk in oldChunks)
                 {
                     TraverseChunk(oldChunk,
-                                  prepare => { /* NOOP */ },
-                                  commit =>
+                                  (prepare, offset) => { /* NOOP */ },
+                                  (commit, offset) =>
                                   {
                                       if (commit.TransactionPosition >= chunkStartPos)
                                           commits.Add(commit.TransactionPosition, new CommitInfo(commit));
@@ -187,29 +187,30 @@ namespace EventStore.Core.TransactionLog.Chunks
                 bool isUpgrade = false;
                 foreach (var oldChunk in oldChunks)
                 {
+                    isUpgrade = oldChunk.ChunkFooter.IsUpgrade;
                     TraverseChunk(oldChunk,
-                                  prepare =>
+                                  (prepare, lengthOffset) =>
                                   {
                                       if (ShouldKeepPrepare(prepare, commits, chunkStartPos, chunkEndPos))
                                       {
-                                          var lengthOffset = 0;
                                           var data = prepare.Data;
                                           if(prepare.Version == LogRecordVersion.LogRecordV0) {
                                               isUpgrade = true;
                                               data = UpgradePrepareData(prepare);
-                                              lengthOffset = 4 + (data.Length - prepare.Data.Length);
+                                              lengthOffset = lengthOffset + 4 + (data.Length - prepare.Data.Length);
                                           }
                                           var updatedPrepare = UpgradePrepareVersion(prepare, data);
                                           positionMapping.Add(WriteRecord(newChunk, updatedPrepare, lengthOffset, isUpgrade));
                                       }
                                   },
-                                  commit =>
+                                  (commit, lengthOffset) =>
                                   {
                                       if (ShouldKeepCommit(commit, commits))
                                       {
-                                          isUpgrade = commit.Version == LogRecordVersion.LogRecordV0;
+                                          isUpgrade = isUpgrade ? isUpgrade : commit.Version == LogRecordVersion.LogRecordV0;
                                           var updatedCommit = UpgradeCommitVersion(commit);
-                                          positionMapping.Add(WriteRecord(newChunk, updatedCommit, commit.Version == LogRecordVersion.LogRecordV0 ? 4 : 0, isUpgrade));
+                                          lengthOffset = lengthOffset + (commit.Version == LogRecordVersion.LogRecordV0 ? 4 : 0);
+                                          positionMapping.Add(WriteRecord(newChunk, updatedCommit, lengthOffset, isUpgrade));
                                       }
                                   },
                                   // we always keep system log records for now
@@ -489,8 +490,8 @@ namespace EventStore.Core.TransactionLog.Chunks
         }
 
         private void TraverseChunk(TFChunk.TFChunk chunk,
-                                   Action<PrepareLogRecord> processPrepare,
-                                   Action<CommitLogRecord> processCommit,
+                                   Action<PrepareLogRecord, int> processPrepare,
+                                   Action<CommitLogRecord, int> processCommit,
                                    Action<SystemLogRecord> processSystem)
         {
             var result = chunk.TryReadFirst();
@@ -502,13 +503,13 @@ namespace EventStore.Core.TransactionLog.Chunks
                     case LogRecordType.Prepare:
                     {
                         var prepare = (PrepareLogRecord)record;
-                        processPrepare(prepare);
+                        processPrepare(prepare, result.LengthOffset);
                         break;
                     }
                     case LogRecordType.Commit:
                     {
                         var commit = (CommitLogRecord)record;
-                        processCommit(commit);
+                        processCommit(commit, result.LengthOffset);
                         break;
                     }
                     case LogRecordType.System:
