@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
 using EventStore.Core.Data;
@@ -8,6 +9,7 @@ using EventStore.Core.Index;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services;
 using EventStore.Core.Services.Storage.ReaderIndex;
+using EventStore.Core.Tests.Bus.Helpers;
 using EventStore.Core.Tests.Fakes;
 using EventStore.Core.TransactionLog;
 using EventStore.Core.TransactionLog.Checkpoint;
@@ -28,6 +30,8 @@ namespace EventStore.Core.Tests.Services.Storage
         protected readonly byte IndexBitnessVersion;
         protected TableIndex TableIndex;
         protected IReadIndex ReadIndex;
+
+        protected List<Message> ScavengeMessages;
 
         protected TFChunkDb Db;
         protected TFChunkWriter Writer;
@@ -103,10 +107,16 @@ namespace EventStore.Core.Tests.Services.Storage
             // scavenge must run after readIndex is built
             if (_scavenge)
             {
+                var _consumer = new TestHandler<Message>();
+                var scavengeBus = new InMemoryBus("Bus");
+                var ioDispatcher = new IODispatcher(scavengeBus, new PublishEnvelope(scavengeBus));
+                scavengeBus.Subscribe(_consumer);
+
                 if (_completeLastChunkOnScavenge)
                     Db.Manager.GetChunk(Db.Manager.ChunksCount - 1).Complete();
-                _scavenger = new TFChunkScavenger(Db, IODispatcher, TableIndex, ReadIndex, Guid.NewGuid(), "fakeNodeIp");
+                _scavenger = new TFChunkScavenger(Db, ioDispatcher, TableIndex, ReadIndex, Guid.NewGuid(), "fakeNodeIp");
                 _scavenger.Scavenge(alwaysKeepScavenged: true, mergeChunks: _mergeChunks);
+                ScavengeMessages = _consumer.HandledMessages;
             }
         }
 
@@ -358,14 +368,17 @@ namespace EventStore.Core.Tests.Services.Storage
             return commit;
         }
 
-        protected PrepareLogRecord WriteSingleEventWithLogVersion0(Guid id, string streamId, long position, long expectedVersion, PrepareFlags? flags = null)
+        protected PrepareLogRecord WriteSingleEventWithLogVersion0(Guid id, string streamId, long position, long expectedVersion, PrepareFlags? flags = null, string data = "")
         {
+            if(string.IsNullOrEmpty(data)) {
+                data = new string('.', 100);
+            }
             if(!flags.HasValue) {
                 flags = PrepareFlags.SingleWrite;
             }
             long pos;
             var record = new PrepareLogRecord(position, id, id, position, 0, streamId, expectedVersion, DateTime.UtcNow,
-                                              flags.Value, "type", new byte[10], new byte[0], LogRecordVersion.LogRecordV0);
+                                              flags.Value, "type", Helper.UTF8NoBom.GetBytes(data), new byte[0], LogRecordVersion.LogRecordV0);
             Writer.Write(record, out pos);
             Writer.Write(new CommitLogRecord(pos, id, position, DateTime.UtcNow, expectedVersion, LogRecordVersion.LogRecordV0), out pos);
             return record;

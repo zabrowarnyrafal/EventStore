@@ -283,6 +283,7 @@ namespace EventStore.Core.TransactionLog.Chunks
             {
                 Log.Info("Got exception while scavenging chunk: #{0}-{1}. This chunk will be skipped\n"
                          + "Exception: {2}.", chunkStartNumber, chunkEndNumber, ex.ToString());
+                newChunk.Dispose();
                 DeleteTempChunk(tmpChunkPath, MaxRetryCount);
                 PublishChunksCompletedEvent(chunkStartNumber, chunkEndNumber, sw.Elapsed, false, 0, ex.Message);
                 return false;

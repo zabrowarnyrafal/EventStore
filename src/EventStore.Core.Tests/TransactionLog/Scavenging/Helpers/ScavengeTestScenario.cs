@@ -89,10 +89,10 @@ namespace EventStore.Core.Tests.TransactionLog.Scavenging.Helpers
         protected List<Message> Scavenge()
         {
             var _consumer = new TestHandler<Message>();
-            var ScavengeBus = new InMemoryBus("Bus");
-            var ioDispatcher = new IODispatcher(ScavengeBus, new PublishEnvelope(ScavengeBus));
+            var scavengeBus = new InMemoryBus("Bus");
+            var ioDispatcher = new IODispatcher(scavengeBus, new PublishEnvelope(scavengeBus));
 
-            ScavengeBus.Subscribe(_consumer);
+            scavengeBus.Subscribe(_consumer);
             var scavenger = new TFChunkScavenger(_dbResult.Db, ioDispatcher, _tableIndex, ReadIndex, Guid.NewGuid(), "fakeNodeIp",
                                             unsafeIgnoreHardDeletes: UnsafeIgnoreHardDelete());
             scavenger.Scavenge(alwaysKeepScavenged: true, mergeChunks: false);
